@@ -1,0 +1,450 @@
+name: update core
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_xray:
+        description: update xray
+        type: boolean
+        required: true
+        default: false
+      xray_version:
+        description: xray version (if enabled, required)
+        type: string
+        required: false
+      update_singbox:
+        description: update singbox
+        type: boolean
+        required: true
+        default: false
+      singbox_version:
+        description: singbox version (if enabled, required)
+        type: string
+        required: false
+      update_mihomo:
+        description: update mihomo
+        type: boolean
+        required: true
+        default: false
+      mihomo_version:
+        description: mihomo version (if enabled, required)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      TARGETS: >-
+        v2rayN-windows-64
+        v2rayN-windows-arm64
+        v2rayN-linux-64
+        v2rayN-linux-arm64
+        v2rayN-linux-riscv64
+        v2rayN-macos-64
+        v2rayN-macos-arm64
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: validate
+        shell: bash
+        env:
+          UPDATE_XRAY: ${{ inputs.update_xray }}
+          XRAY_VERSION: ${{ inputs.xray_version }}
+          UPDATE_SINGBOX: ${{ inputs.update_singbox }}
+          SINGBOX_VERSION: ${{ inputs.singbox_version }}
+          UPDATE_MIHOMO: ${{ inputs.update_mihomo }}
+          MIHOMO_VERSION: ${{ inputs.mihomo_version }}
+        run: |
+          set -euo pipefail
+
+          trim() {
+            local s="${1:-}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          fail=0
+
+          [[ "$UPDATE_XRAY" == "true" || "$UPDATE_SINGBOX" == "true" || "$UPDATE_MIHOMO" == "true" ]] || { echo "::error::at least one core must be selected"; fail=1; }
+          [[ "$UPDATE_XRAY" != "true" || -n "$(trim "${XRAY_VERSION:-}")" ]] || { echo "::error::xray_version is required"; fail=1; }
+          [[ "$UPDATE_SINGBOX" != "true" || -n "$(trim "${SINGBOX_VERSION:-}")" ]] || { echo "::error::singbox_version is required"; fail=1; }
+          [[ "$UPDATE_MIHOMO" != "true" || -n "$(trim "${MIHOMO_VERSION:-}")" ]] || { echo "::error::mihomo_version is required"; fail=1; }
+
+          exit "$fail"
+
+      - name: update
+        shell: bash
+        env:
+          UPDATE_XRAY: ${{ inputs.update_xray }}
+          XRAY_VERSION: ${{ inputs.xray_version }}
+          UPDATE_SINGBOX: ${{ inputs.update_singbox }}
+          SINGBOX_VERSION: ${{ inputs.singbox_version }}
+          UPDATE_MIHOMO: ${{ inputs.update_mihomo }}
+          MIHOMO_VERSION: ${{ inputs.mihomo_version }}
+        run: |
+          set -euo pipefail
+
+          ROOT="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/update-core-bin"
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+
+          log() {
+            echo "[*] $*"
+          }
+
+          ensure_dir() {
+            mkdir -p "$1"
+          }
+
+          reset_dir() {
+            rm -rf "$1"
+            mkdir -p "$1"
+          }
+
+          trim() {
+            local s="${1:-}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          with_v() {
+            local v
+            v="$(trim "$1")"
+            [[ "$v" == v* ]] && printf '%s' "$v" || printf 'v%s' "$v"
+          }
+
+          no_v() {
+            local v
+            v="$(trim "$1")"
+            printf '%s' "${v#v}"
+          }
+
+          is_windows() {
+            [[ "$1" == v2rayN-windows-* ]]
+          }
+
+          is_linux() {
+            [[ "$1" == v2rayN-linux-* ]]
+          }
+
+          is_macos() {
+            [[ "$1" == v2rayN-macos-* ]]
+          }
+
+          target_platform() {
+            case "$1" in
+              v2rayN-windows-64|v2rayN-windows-arm64) echo windows ;;
+              v2rayN-linux-64|v2rayN-linux-arm64|v2rayN-linux-riscv64) echo linux ;;
+              v2rayN-macos-64|v2rayN-macos-arm64) echo macos ;;
+              *) return 1 ;;
+            esac
+          }
+
+          target_arch() {
+            case "$1" in
+              v2rayN-windows-64|v2rayN-linux-64|v2rayN-macos-64) echo amd64 ;;
+              v2rayN-windows-arm64|v2rayN-linux-arm64|v2rayN-macos-arm64) echo arm64 ;;
+              v2rayN-linux-riscv64) echo riscv64 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          core_dir() {
+            case "$1" in
+              xray) echo xray ;;
+              singbox) echo sing_box ;;
+              mihomo) echo mihomo ;;
+              *) return 1 ;;
+            esac
+          }
+
+          download() {
+            local url="$1"
+            local out="$2"
+            curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$out"
+          }
+
+          unzip_to() {
+            local archive="$1"
+            local dest="$2"
+            reset_dir "$dest"
+            unzip -q "$archive" -d "$dest"
+          }
+
+          untar_to() {
+            local archive="$1"
+            local dest="$2"
+            reset_dir "$dest"
+            tar -xzf "$archive" -C "$dest"
+          }
+
+          ungz_to_file() {
+            local archive="$1"
+            local out="$2"
+            ensure_dir "$(dirname "$out")"
+            gunzip -c "$archive" > "$out"
+          }
+
+          copy_if_exists() {
+            local src="$1"
+            local dst="$2"
+            [[ -f "$src" ]] || return 0
+            ensure_dir "$(dirname "$dst")"
+            cp -f "$src" "$dst"
+          }
+
+          find_first_file() {
+            local dir="$1"
+            shift
+            local pattern
+            for pattern in "$@"; do
+              local hit
+              hit="$(find "$dir" -type f \( -iname "$pattern" \) | head -n 1 || true)"
+              if [[ -n "$hit" ]]; then
+                printf '%s' "$hit"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          xray_url() {
+            local version="$1"
+            local target="$2"
+            local v
+            v="$(with_v "$version")"
+            case "$target" in
+              v2rayN-linux-64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-64.zip" ;;
+              v2rayN-linux-arm64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-arm64-v8a.zip" ;;
+              v2rayN-linux-riscv64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-riscv64.zip" ;;
+              v2rayN-macos-64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-macos-64.zip" ;;
+              v2rayN-macos-arm64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-macos-arm64-v8a.zip" ;;
+              v2rayN-windows-64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-windows-64.zip" ;;
+              v2rayN-windows-arm64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-windows-arm64-v8a.zip" ;;
+              *) return 1 ;;
+            esac
+          }
+
+          singbox_url() {
+            local version="$1"
+            local target="$2"
+            local v nv
+            v="$(with_v "$version")"
+            nv="$(no_v "$version")"
+            case "$target" in
+              v2rayN-linux-64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-amd64.tar.gz" ;;
+              v2rayN-linux-arm64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-arm64.tar.gz" ;;
+              v2rayN-linux-riscv64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-riscv64.tar.gz" ;;
+              v2rayN-windows-64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-windows-amd64.zip" ;;
+              v2rayN-windows-arm64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-windows-arm64.zip" ;;
+              v2rayN-macos-64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-darwin-amd64.tar.gz" ;;
+              v2rayN-macos-arm64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-darwin-arm64.tar.gz" ;;
+              *) return 1 ;;
+            esac
+          }
+
+          mihomo_url() {
+            local version="$1"
+            local target="$2"
+            local v
+            v="$(with_v "$version")"
+            case "$target" in
+              v2rayN-linux-64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-amd64-${v}.gz" ;;
+              v2rayN-linux-arm64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-arm64-${v}.gz" ;;
+              v2rayN-linux-riscv64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-riscv64-${v}.gz" ;;
+              v2rayN-macos-64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-darwin-amd64-${v}.gz" ;;
+              v2rayN-macos-arm64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-darwin-arm64-${v}.gz" ;;
+              v2rayN-windows-64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-windows-amd64-${v}.zip" ;;
+              v2rayN-windows-arm64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-windows-arm64-${v}.zip" ;;
+              *) return 1 ;;
+            esac
+          }
+
+          sync_exec_mode() {
+            local target="$1"
+            local dest="$2"
+            is_windows "$target" && return 0
+            find "$dest" -type f -exec chmod 755 {} +
+          }
+
+          update_xray_one() {
+            local target="$1"
+            local version="$2"
+            local dest="$ROOT/$target/bin/$(core_dir xray)"
+            local tmp="$WORK/$target/xray"
+            local archive="$tmp/archive.zip"
+            local unpack="$tmp/unpack"
+
+            reset_dir "$tmp"
+            reset_dir "$dest"
+
+            download "$(xray_url "$version" "$target")" "$archive"
+            unzip_to "$archive" "$unpack"
+
+            if is_windows "$target"; then
+              copy_if_exists "$(find_first_file "$unpack" 'xray.exe')" "$dest/xray.exe"
+              copy_if_exists "$(find_first_file "$unpack" 'wintun.dll')" "$dest/wintun.dll"
+            else
+              copy_if_exists "$(find_first_file "$unpack" 'xray')" "$dest/xray"
+            fi
+
+            sync_exec_mode "$target" "$dest"
+          }
+
+          update_singbox_one() {
+            local target="$1"
+            local version="$2"
+            local dest="$ROOT/$target/bin/$(core_dir singbox)"
+            local tmp="$WORK/$target/singbox"
+            local archive="$tmp/archive"
+            local unpack="$tmp/unpack"
+
+            reset_dir "$tmp"
+            reset_dir "$dest"
+
+            if is_windows "$target"; then
+              archive="${archive}.zip"
+              download "$(singbox_url "$version" "$target")" "$archive"
+              unzip_to "$archive" "$unpack"
+              copy_if_exists "$(find_first_file "$unpack" 'sing-box.exe')" "$dest/sing-box.exe"
+              copy_if_exists "$(find_first_file "$unpack" 'libcronet.dll')" "$dest/libcronet.dll"
+            else
+              archive="${archive}.tar.gz"
+              download "$(singbox_url "$version" "$target")" "$archive"
+              untar_to "$archive" "$unpack"
+              copy_if_exists "$(find_first_file "$unpack" 'sing-box')" "$dest/sing-box"
+              copy_if_exists "$(find_first_file "$unpack" 'libcronet.so' 'libcronet.so.*')" "$dest/libcronet.so"
+            fi
+
+            sync_exec_mode "$target" "$dest"
+          }
+
+          update_mihomo_one() {
+            local target="$1"
+            local version="$2"
+            local dest="$ROOT/$target/bin/$(core_dir mihomo)"
+            local tmp="$WORK/$target/mihomo"
+            local archive="$tmp/archive"
+            local unpack="$tmp/unpack"
+
+            reset_dir "$tmp"
+            reset_dir "$dest"
+
+            if is_windows "$target"; then
+              archive="${archive}.zip"
+              download "$(mihomo_url "$version" "$target")" "$archive"
+              unzip_to "$archive" "$unpack"
+              copy_if_exists "$(find_first_file "$unpack" 'mihomo*.exe' 'clash*.exe')" "$dest/mihomo.exe"
+            else
+              archive="${archive}.gz"
+              download "$(mihomo_url "$version" "$target")" "$archive"
+              ungz_to_file "$archive" "$dest/mihomo"
+            fi
+
+            sync_exec_mode "$target" "$dest"
+          }
+
+          repack_target() {
+            local target="$1"
+            local zip="$ROOT/${target}.zip"
+            rm -f "$zip"
+            (
+              cd "$ROOT"
+              zip -qr "${target}.zip" "$target"
+            )
+          }
+
+          for target in $TARGETS; do
+            log "processing $target"
+
+            [[ -d "$ROOT/$target" ]] || { echo "::error::missing directory $target"; exit 1; }
+
+            if [[ "$UPDATE_XRAY" == "true" ]]; then
+              update_xray_one "$target" "$XRAY_VERSION"
+            fi
+
+            if [[ "$UPDATE_SINGBOX" == "true" ]]; then
+              update_singbox_one "$target" "$SINGBOX_VERSION"
+            fi
+
+            if [[ "$UPDATE_MIHOMO" == "true" ]]; then
+              update_mihomo_one "$target" "$MIHOMO_VERSION"
+            fi
+
+            repack_target "$target"
+          done
+
+      - name: commit
+        shell: bash
+        env:
+          UPDATE_XRAY: ${{ inputs.update_xray }}
+          XRAY_VERSION: ${{ inputs.xray_version }}
+          UPDATE_SINGBOX: ${{ inputs.update_singbox }}
+          SINGBOX_VERSION: ${{ inputs.singbox_version }}
+          UPDATE_MIHOMO: ${{ inputs.update_mihomo }}
+          MIHOMO_VERSION: ${{ inputs.mihomo_version }}
+        run: |
+          set -euo pipefail
+
+          trim() {
+            local s="${1:-}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          with_v() {
+            local v
+            v="$(trim "$1")"
+            [[ "$v" == v* ]] && printf '%s' "$v" || printf 'v%s' "$v"
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            v2rayN-windows-64 \
+            v2rayN-windows-arm64 \
+            v2rayN-linux-64 \
+            v2rayN-linux-arm64 \
+            v2rayN-linux-riscv64 \
+            v2rayN-macos-64 \
+            v2rayN-macos-arm64 \
+            v2rayN-windows-64.zip \
+            v2rayN-windows-arm64.zip \
+            v2rayN-linux-64.zip \
+            v2rayN-linux-arm64.zip \
+            v2rayN-linux-riscv64.zip \
+            v2rayN-macos-64.zip \
+            v2rayN-macos-arm64.zip
+
+          if git diff --cached --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+
+          details=()
+
+          if [[ "$UPDATE_XRAY" == "true" ]]; then
+            details+=("xray $(with_v "$XRAY_VERSION")")
+          fi
+
+          if [[ "$UPDATE_SINGBOX" == "true" ]]; then
+            details+=("singbox $(with_v "$SINGBOX_VERSION")")
+          fi
+
+          if [[ "$UPDATE_MIHOMO" == "true" ]]; then
+            details+=("mihomo $(with_v "$MIHOMO_VERSION")")
+          fi
+
+          git commit -m "Update: $(IFS=', '; echo "${details[*]}")"
+          git push
