@@ -161,7 +161,7 @@ jobs:
 
             rm -f "$zip_file"
 
-            zip -r -9 "$zip_file" "$target" \
+            zip -qr "$zip_file" "$target" \
               -x "*.git*" \
               -x "*/.DS_Store" \
               -x "*/__MACOSX/*"
