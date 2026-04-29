@@ -34,6 +34,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: core-bin-update
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest

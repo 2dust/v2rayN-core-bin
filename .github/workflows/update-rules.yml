@@ -1,0 +1,201 @@
+name: update rules
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 19 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: core-bin-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl zip unzip
+
+      - name: Update rule files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          targets=(
+            v2rayN-linux-64
+            v2rayN-linux-arm64
+            v2rayN-linux-riscv64
+            v2rayN-macos-64
+            v2rayN-macos-arm64
+            v2rayN-windows-64
+            v2rayN-windows-arm64
+          )
+
+          root_files=(
+            geosite.dat
+            geoip.dat
+            geoip-only-cn-private.dat
+            Country.mmdb
+            geoip.metadb
+          )
+
+          geoip_srs=(
+            geoip-private.srs
+            geoip-cn.srs
+            geoip-facebook.srs
+            geoip-fastly.srs
+            geoip-google.srs
+            geoip-netflix.srs
+            geoip-telegram.srs
+            geoip-twitter.srs
+          )
+
+          geosite_srs=(
+            geosite-cn.srs
+            geosite-gfw.srs
+            geosite-google.srs
+            geosite-greatfire.srs
+            geosite-geolocation-cn.srs
+            geosite-category-ads-all.srs
+            geosite-private.srs
+          )
+
+          fetch_file() {
+            local url="$1"
+            local output="$2"
+
+            mkdir -p "$(dirname "$output")"
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --retry 5 \
+              --retry-delay 2 \
+              --connect-timeout 20 \
+              --max-time 300 \
+              --output "$output" \
+              "$url"
+
+            test -s "$output"
+          }
+
+          update_rules() {
+            local target="$1"
+            local bin_dir="$target/bin"
+            local srss_dir="$bin_dir/srss"
+            local file=""
+
+            mkdir -p "$bin_dir" "$srss_dir"
+
+            fetch_file "https://github.com/Loyalsoldier/V2ray-rules-dat/releases/latest/download/geosite.dat" "$bin_dir/geosite.dat"
+            fetch_file "https://github.com/Loyalsoldier/V2ray-rules-dat/releases/latest/download/geoip.dat" "$bin_dir/geoip.dat"
+            fetch_file "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/geoip-only-cn-private.dat" "$bin_dir/geoip-only-cn-private.dat"
+            fetch_file "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/Country.mmdb" "$bin_dir/Country.mmdb"
+            fetch_file "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.metadb" "$bin_dir/geoip.metadb"
+
+            for file in "${geoip_srs[@]}"; do
+              fetch_file "https://raw.githubusercontent.com/2dust/sing-box-rules/refs/heads/rule-set-geoip/$file" "$srss_dir/$file"
+            done
+
+            for file in "${geosite_srs[@]}"; do
+              fetch_file "https://raw.githubusercontent.com/2dust/sing-box-rules/refs/heads/rule-set-geosite/$file" "$srss_dir/$file"
+            done
+          }
+
+          validate_rules() {
+            local target="$1"
+            local bin_dir="$target/bin"
+            local srss_dir="$bin_dir/srss"
+            local file=""
+
+            for file in "${root_files[@]}"; do
+              test -s "$bin_dir/$file"
+            done
+
+            for file in "${geoip_srs[@]}"; do
+              test -s "$srss_dir/$file"
+            done
+
+            for file in "${geosite_srs[@]}"; do
+              test -s "$srss_dir/$file"
+            done
+          }
+
+          for target in "${targets[@]}"; do
+            test -d "$target/bin"
+            update_rules "$target"
+            validate_rules "$target"
+          done
+
+      - name: Repack zip files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          targets=(
+            v2rayN-linux-64
+            v2rayN-linux-arm64
+            v2rayN-linux-riscv64
+            v2rayN-macos-64
+            v2rayN-macos-arm64
+            v2rayN-windows-64
+            v2rayN-windows-arm64
+          )
+
+          for target in "${targets[@]}"; do
+            zip_file="$target.zip"
+
+            rm -f "$zip_file"
+
+            zip -qr "$zip_file" "$target" \
+              -x "*.git*" \
+              -x "*/.DS_Store" \
+              -x "*/__MACOSX/*"
+
+            unzip -t "$zip_file"
+          done
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            v2rayN-linux-64/bin \
+            v2rayN-linux-arm64/bin \
+            v2rayN-linux-riscv64/bin \
+            v2rayN-macos-64/bin \
+            v2rayN-macos-arm64/bin \
+            v2rayN-windows-64/bin \
+            v2rayN-windows-arm64/bin \
+            v2rayN-linux-64.zip \
+            v2rayN-linux-arm64.zip \
+            v2rayN-linux-riscv64.zip \
+            v2rayN-macos-64.zip \
+            v2rayN-macos-arm64.zip \
+            v2rayN-windows-64.zip \
+            v2rayN-windows-arm64.zip
+
+          git commit -m "Update rule files"
+          git push
