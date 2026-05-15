@@ -37,6 +37,7 @@ jobs:
             v2rayN-linux-64
             v2rayN-linux-arm64
             v2rayN-linux-riscv64
+            v2rayN-linux-loong64
             v2rayN-macos-64
             v2rayN-macos-arm64
             v2rayN-windows-64
@@ -136,7 +137,11 @@ jobs:
           }
 
           for target in "${targets[@]}"; do
-            test -d "$target/bin"
+            if [[ ! -d "$target/bin" ]]; then
+              echo "[*] create missing target: $target"
+              mkdir -p "$target/bin/srss"
+            fi
+
             update_rules "$target"
             validate_rules "$target"
           done
@@ -150,6 +155,7 @@ jobs:
             v2rayN-linux-64
             v2rayN-linux-arm64
             v2rayN-linux-riscv64
+            v2rayN-linux-loong64
             v2rayN-macos-64
             v2rayN-macos-arm64
             v2rayN-windows-64
@@ -185,6 +191,7 @@ jobs:
             v2rayN-linux-64/bin \
             v2rayN-linux-arm64/bin \
             v2rayN-linux-riscv64/bin \
+            v2rayN-linux-loong64/bin \
             v2rayN-macos-64/bin \
             v2rayN-macos-arm64/bin \
             v2rayN-windows-64/bin \
@@ -192,6 +199,7 @@ jobs:
             v2rayN-linux-64.zip \
             v2rayN-linux-arm64.zip \
             v2rayN-linux-riscv64.zip \
+            v2rayN-linux-loong64.zip \
             v2rayN-macos-64.zip \
             v2rayN-macos-arm64.zip \
             v2rayN-windows-64.zip \

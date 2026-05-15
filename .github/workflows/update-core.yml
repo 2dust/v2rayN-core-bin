@@ -48,6 +48,7 @@ jobs:
         v2rayN-linux-64
         v2rayN-linux-arm64
         v2rayN-linux-riscv64
+        v2rayN-linux-loong64
         v2rayN-macos-64
         v2rayN-macos-arm64
     steps:
@@ -147,7 +148,7 @@ jobs:
           target_platform() {
             case "$1" in
               v2rayN-windows-64|v2rayN-windows-arm64) echo windows ;;
-              v2rayN-linux-64|v2rayN-linux-arm64|v2rayN-linux-riscv64) echo linux ;;
+              v2rayN-linux-64|v2rayN-linux-arm64|v2rayN-linux-riscv64|v2rayN-linux-loong64) echo linux ;;
               v2rayN-macos-64|v2rayN-macos-arm64) echo macos ;;
               *) return 1 ;;
             esac
@@ -158,6 +159,7 @@ jobs:
               v2rayN-windows-64|v2rayN-linux-64|v2rayN-macos-64) echo amd64 ;;
               v2rayN-windows-arm64|v2rayN-linux-arm64|v2rayN-macos-arm64) echo arm64 ;;
               v2rayN-linux-riscv64) echo riscv64 ;;
+              v2rayN-linux-loong64) echo loong64 ;;
               *) return 1 ;;
             esac
           }
@@ -230,6 +232,7 @@ jobs:
               v2rayN-linux-64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-64.zip" ;;
               v2rayN-linux-arm64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-arm64-v8a.zip" ;;
               v2rayN-linux-riscv64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-riscv64.zip" ;;
+              v2rayN-linux-loong64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-linux-loong64.zip" ;;
               v2rayN-macos-64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-macos-64.zip" ;;
               v2rayN-macos-arm64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-macos-arm64-v8a.zip" ;;
               v2rayN-windows-64) echo "https://github.com/XTLS/Xray-core/releases/download/${v}/Xray-windows-64.zip" ;;
@@ -248,6 +251,7 @@ jobs:
               v2rayN-linux-64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-amd64.tar.gz" ;;
               v2rayN-linux-arm64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-arm64.tar.gz" ;;
               v2rayN-linux-riscv64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-riscv64.tar.gz" ;;
+              v2rayN-linux-loong64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-linux-loong64.tar.gz" ;;
               v2rayN-windows-64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-windows-amd64.zip" ;;
               v2rayN-windows-arm64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-windows-arm64.zip" ;;
               v2rayN-macos-64) echo "https://github.com/SagerNet/sing-box/releases/download/${v}/sing-box-${nv}-darwin-amd64.tar.gz" ;;
@@ -265,6 +269,7 @@ jobs:
               v2rayN-linux-64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-amd64-${v}.gz" ;;
               v2rayN-linux-arm64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-arm64-${v}.gz" ;;
               v2rayN-linux-riscv64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-riscv64-${v}.gz" ;;
+              v2rayN-linux-loong64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-linux-loong64-abi2-${v}.gz" ;;
               v2rayN-macos-64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-darwin-amd64-${v}.gz" ;;
               v2rayN-macos-arm64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-darwin-arm64-${v}.gz" ;;
               v2rayN-windows-64) echo "https://github.com/MetaCubeX/mihomo/releases/download/${v}/mihomo-windows-amd64-${v}.zip" ;;
@@ -370,7 +375,10 @@ jobs:
           for target in $TARGETS; do
             log "processing $target"
 
-            [[ -d "$ROOT/$target" ]] || { echo "::error::missing directory $target"; exit 1; }
+            if [[ ! -d "$ROOT/$target" ]]; then
+              echo "[*] create missing target directory: $target"
+              mkdir -p "$ROOT/$target/bin/xray" "$ROOT/$target/bin/sing_box" "$ROOT/$target/bin/mihomo" "$ROOT/$target/bin/srss"
+            fi
 
             if [[ "$UPDATE_XRAY" == "true" ]]; then
               update_xray_one "$target" "$XRAY_VERSION"
@@ -421,6 +429,7 @@ jobs:
             v2rayN-linux-64 \
             v2rayN-linux-arm64 \
             v2rayN-linux-riscv64 \
+            v2rayN-linux-loong64 \
             v2rayN-macos-64 \
             v2rayN-macos-arm64 \
             v2rayN-windows-64.zip \
@@ -428,6 +437,7 @@ jobs:
             v2rayN-linux-64.zip \
             v2rayN-linux-arm64.zip \
             v2rayN-linux-riscv64.zip \
+            v2rayN-linux-loong64.zip \
             v2rayN-macos-64.zip \
             v2rayN-macos-arm64.zip
 
