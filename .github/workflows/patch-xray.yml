@@ -1,0 +1,280 @@
+name: Patch Xray
+
+on:
+  workflow_dispatch:
+    inputs:
+      xray_version:
+        description: "Xray version, e.g. 26.1.23 or v26.1.23"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: patch-xray
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+
+    env:
+      XRAY_REPO: autorepobot/Xray-core
+      TARGETS: >-
+        v2rayN-windows-64
+        v2rayN-windows-arm64
+        v2rayN-linux-64
+        v2rayN-linux-arm64
+        v2rayN-linux-riscv64
+        v2rayN-linux-loong64
+        v2rayN-macos-64
+        v2rayN-macos-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Patch Xray and repack
+        shell: bash
+        env:
+          XRAY_VERSION_INPUT: ${{ inputs.xray_version }}
+        run: |
+          set -euo pipefail
+
+          ROOT="$GITHUB_WORKSPACE"
+          WORK="$RUNNER_TEMP/patch-xray"
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+
+          trim() {
+            local s="${1:-}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          with_v() {
+            local v
+            v="$(trim "$1")"
+            [[ "$v" == v* ]] && printf '%s' "$v" || printf 'v%s' "$v"
+          }
+
+          log() {
+            echo "[*] $*"
+          }
+
+          ensure_dir() {
+            mkdir -p "$1"
+          }
+
+          reset_dir() {
+            rm -rf "$1"
+            mkdir -p "$1"
+          }
+
+          download() {
+            local url="$1"
+            local out="$2"
+            log "download: $url"
+            curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$out"
+          }
+
+          unzip_to() {
+            local archive="$1"
+            local dest="$2"
+            reset_dir "$dest"
+            unzip -q "$archive" -d "$dest"
+          }
+
+          is_windows() {
+            [[ "$1" == v2rayN-windows-* ]]
+          }
+
+          sync_exec_mode() {
+            local target="$1"
+            local dest="$2"
+            is_windows "$target" && return 0
+            find "$dest" -type f -exec chmod 755 {} +
+          }
+
+          find_first_file() {
+            local dir="$1"
+            shift
+            local pattern
+            for pattern in "$@"; do
+              local hit
+              hit="$(find "$dir" -type f -iname "$pattern" | head -n 1 || true)"
+              if [[ -n "$hit" ]]; then
+                printf '%s' "$hit"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          copy_required() {
+            local src="$1"
+            local dst="$2"
+
+            if [[ -z "$src" || ! -f "$src" ]]; then
+              echo "::error::missing required file for $dst"
+              exit 1
+            fi
+
+            ensure_dir "$(dirname "$dst")"
+            cp -f "$src" "$dst"
+          }
+
+          copy_optional() {
+            local src="$1"
+            local dst="$2"
+
+            if [[ -n "$src" && -f "$src" ]]; then
+              ensure_dir "$(dirname "$dst")"
+              cp -f "$src" "$dst"
+            fi
+          }
+
+          xray_url() {
+            local version="$1"
+            local target="$2"
+            local v
+            v="$(with_v "$version")"
+
+            case "$target" in
+              v2rayN-windows-64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-windows-64.zip"
+                ;;
+              v2rayN-windows-arm64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-windows-arm64-v8a.zip"
+                ;;
+              v2rayN-linux-64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-linux-64.zip"
+                ;;
+              v2rayN-linux-arm64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-linux-arm64-v8a.zip"
+                ;;
+              v2rayN-linux-riscv64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-linux-riscv64.zip"
+                ;;
+              v2rayN-linux-loong64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-linux-loong64.zip"
+                ;;
+              v2rayN-macos-64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-macos-64.zip"
+                ;;
+              v2rayN-macos-arm64)
+                echo "https://github.com/${XRAY_REPO}/releases/download/${v}/Xray-macos-arm64-v8a.zip"
+                ;;
+              *)
+                echo "::error::unsupported target: $target"
+                exit 1
+                ;;
+            esac
+          }
+
+          patch_xray_one() {
+            local target="$1"
+            local version="$2"
+
+            local dest="$ROOT/$target/bin/xray"
+            local tmp="$WORK/$target"
+            local archive="$tmp/xray.zip"
+            local unpack="$tmp/unpack"
+
+            if [[ ! -d "$ROOT/$target" ]]; then
+              echo "::error::target directory not found: $target"
+              exit 1
+            fi
+
+            reset_dir "$tmp"
+            reset_dir "$dest"
+
+            download "$(xray_url "$version" "$target")" "$archive"
+            unzip_to "$archive" "$unpack"
+
+            if is_windows "$target"; then
+              copy_required "$(find_first_file "$unpack" "xray.exe")" "$dest/xray.exe"
+              copy_required "$(find_first_file "$unpack" "wintun.dll")" "$dest/wintun.dll"
+            else
+              copy_required "$(find_first_file "$unpack" "xray")" "$dest/xray"
+            fi
+
+            sync_exec_mode "$target" "$dest"
+          }
+
+          repack_target() {
+            local target="$1"
+            local zip_file="$ROOT/${target}.zip"
+
+            rm -f "$zip_file"
+
+            (
+              cd "$ROOT"
+              zip -qr "${target}.zip" "$target"
+            )
+          }
+
+          XRAY_VERSION="$(with_v "$XRAY_VERSION_INPUT")"
+          log "patch xray version: $XRAY_VERSION"
+
+          for target in $TARGETS; do
+            log "processing $target"
+
+            patch_xray_one "$target" "$XRAY_VERSION"
+            repack_target "$target"
+          done
+
+      - name: Commit
+        shell: bash
+        env:
+          XRAY_VERSION_INPUT: ${{ inputs.xray_version }}
+        run: |
+          set -euo pipefail
+
+          trim() {
+            local s="${1:-}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+
+          with_v() {
+            local v
+            v="$(trim "$1")"
+            [[ "$v" == v* ]] && printf '%s' "$v" || printf 'v%s' "$v"
+          }
+
+          XRAY_VERSION="$(with_v "$XRAY_VERSION_INPUT")"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            v2rayN-windows-64/bin/xray \
+            v2rayN-windows-arm64/bin/xray \
+            v2rayN-linux-64/bin/xray \
+            v2rayN-linux-arm64/bin/xray \
+            v2rayN-linux-riscv64/bin/xray \
+            v2rayN-linux-loong64/bin/xray \
+            v2rayN-macos-64/bin/xray \
+            v2rayN-macos-arm64/bin/xray \
+            v2rayN-windows-64.zip \
+            v2rayN-windows-arm64.zip \
+            v2rayN-linux-64.zip \
+            v2rayN-linux-arm64.zip \
+            v2rayN-linux-riscv64.zip \
+            v2rayN-linux-loong64.zip \
+            v2rayN-macos-64.zip \
+            v2rayN-macos-arm64.zip
+
+          if git diff --cached --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+
+          git commit -m "Patch Xray $XRAY_VERSION"
+          git push
