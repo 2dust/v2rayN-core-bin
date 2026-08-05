@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      XRAY_REPO: autorepobot/Xray-core
+      XRAY_REPO: autorepobot/Xray
       TARGETS: >-
         v2rayN-windows-64
         v2rayN-windows-arm64
@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
